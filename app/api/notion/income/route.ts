@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const { dbId, item, amount, account, memo } = await req.json()
+    const { dbId, item, amount, account } = await req.json()
 
     if (!dbId || !item || !amount) {
       return NextResponse.json({ error: 'dbId, item, amount 필수' }, { status: 400 })
@@ -16,12 +16,16 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().split('T')[0]
 
     const properties: Record<string, any> = {
-      '항목': { title: [{ text: { content: item } }] },
-      '금액': { number: Number(amount) },
-      '날짜': { date: { start: today } },
+      '수입원':   { title: [{ text: { content: item } }] },
+      '수입금액': { number: Number(amount) },
+      '수입날짜': { date: { start: today } },
+      '결제 상태': { status: { name: '결제완료' } },
     }
-    if (account) properties['계좌'] = { select: { name: account } }
-    if (memo)    properties['메모'] = { rich_text: [{ text: { content: memo } }] }
+
+    // 계좌 (Relation - account page id 필요)
+    if (account) {
+      properties['계좌'] = { relation: [{ id: account }] }
+    }
 
     const res = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',

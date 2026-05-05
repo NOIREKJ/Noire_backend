@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const NOTION_VERSION = '2022-06-28'
 
+// NOIRE 새 템플릿 DB 이름들
 const DB_NAMES = {
-  expense:  '지출',
-  income:   '수입',
-  accounts: '계좌',
-  todos:    '할일',
+  expense:  'expenses db',
+  income:   'income db',
+  accounts: 'accounts db',
+  category: 'Category db',
+  stock:    'Stock db',
+  networth: 'Net Worth db',
 }
 
 export async function GET(req: NextRequest) {
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
       headers: notionHeaders(token),
       body: JSON.stringify({
         filter: { value: 'database', property: 'object' },
-        page_size: 50,
+        page_size: 100,
       }),
     })
 
@@ -32,7 +35,10 @@ export async function GET(req: NextRequest) {
     for (const db of results) {
       const title = db.title?.[0]?.plain_text ?? ''
       for (const [key, name] of Object.entries(DB_NAMES)) {
-        if (title === name) found[key] = db.id
+        // 대소문자 구분 없이, 공백 차이 무시
+        if (title.toLowerCase().trim() === name.toLowerCase().trim()) {
+          found[key] = db.id
+        }
       }
     }
 
