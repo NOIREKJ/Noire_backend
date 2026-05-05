@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const { dbId, item, amount, category, account, memo } = await req.json()
+    const { dbId, item, amount, gubun, account, category, categoryDbId } = await req.json()
 
     if (!dbId || !item || !amount) {
       return NextResponse.json({ error: 'dbId, item, amount 필수' }, { status: 400 })
@@ -16,13 +16,25 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().split('T')[0]
 
     const properties: Record<string, any> = {
-      '항목': { title: [{ text: { content: item } }] },
-      '금액': { number: Number(amount) },
-      '날짜': { date: { start: today } },
+      '지출 내용': { title: [{ text: { content: item } }] },
+      '지출 금액': { number: Number(amount) },
+      '지출 날짜': { date: { start: today } },
+      '구분':     { select: { name: gubun || '변동' } },
+      '결제 상태': { status: { name: '결제완료' } },
     }
-    if (category) properties['카테고리'] = { select: { name: category } }
-    if (account)  properties['계좌']     = { select: { name: account } }
-    if (memo)     properties['메모']     = { rich_text: [{ text: { content: memo } }] }
+
+    // 카테고리 (Relation - category page id 필요)
+    if (category && categoryDbId) {
+      const catId = await findCategoryId(token, categoryDbId, category)
+      if (catId) {
+        properties['지출 카테고리'] = { relation: [{ id: catId }] }
+      }
+    }
+
+    // 계좌 (Relation - account page id 필요)
+    if (account) {
+      properties['계좌'] = { relation: [{ id: account }] }
+    }
 
     const res = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
@@ -42,6 +54,26 @@ export async function POST(req: NextRequest) {
 
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
+}
+
+// 카테고리 이름으로 page id 찾기
+async function findCategoryId(token: string, categoryDbId: string, name: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${categoryDbId}/query`, {
+      method: 'POST',
+      headers: notionHeaders(token),
+      body: JSON.stringify({
+        filter: {
+          property: '지출 분류 카테고리',
+          title: { equals: name }
+        }
+      })
+    })
+    const data = await res.json()
+    return data.results?.[0]?.id ?? null
+  } catch {
+    return null
   }
 }
 
