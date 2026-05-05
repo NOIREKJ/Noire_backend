@@ -4,12 +4,15 @@ const NOTION_VERSION = '2022-06-28'
 
 // NOIRE 새 템플릿 DB 이름들
 const DB_NAMES = {
-  expense:  'expenses db',
-  income:   'income db',
-  accounts: 'accounts db',
-  category: 'Category db',
-  stock:    'Stock db',
-  networth: 'Net Worth db',
+  expense:  ['expenses db', 'expense db', '지출 db', '지출'],
+  income:   ['income db', '수입 db', '수입'],
+  accounts: ['accounts db', '계좌 db', '계좌'],
+  category: ['category db', 'categories db', '카테고리 db', '카테고리'],
+  stock:    ['stock db', 'stocks db', '주식 db', '주식'],
+  networth: ['net worth db', 'networth db', '자산 db', '순자산 db'],
+  todos:    ['todo db', 'todos db', 'to-do db', '할일 db', '할일'],
+};
+
 }
 
 export async function GET(req: NextRequest) {

@@ -37,18 +37,16 @@ export async function GET(req: NextRequest) {
     })
 
     const data = await res.json()
-    if (!res.ok) {
-      console.error('Notion monthly error:', JSON.stringify(data))
-      return NextResponse.json({ error: data.message ?? 'Notion error' }, { status: 400 })
-    }
+    if (!res.ok) return NextResponse.json({ error: 'Notion error' }, { status: 400 })
 
     const items = (data.results as any[]).map(page => {
       const p = page.properties
       return {
         name:     p['지출 내용']?.title?.[0]?.plain_text ?? '',
         amount:   p['지출 금액']?.number ?? 0,
-        category: p['지출 카테고리']?.relation?.[0]?.id ?? '',  // Relation
+        category: p['지출 카테고리']?.relation?.[0]?.id ?? '',
         date:     p['지출 날짜']?.date?.start ?? '',
+        gubun:    p['구분']?.select?.name ?? '',
       }
     }).filter(i => i.name && i.amount > 0)
 
@@ -56,8 +54,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ total, items, year: y, month: m })
 
-  } catch (e: any) {
-    console.error('monthly server error:', e)
+  } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

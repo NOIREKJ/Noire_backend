@@ -6,55 +6,80 @@ export async function GET(req: NextRequest) {
   const token = getToken(req)
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const dbId  = req.nextUrl.searchParams.get('dbId')
-  const year  = parseInt(req.nextUrl.searchParams.get('year')  ?? '')
-  const month = parseInt(req.nextUrl.searchParams.get('month') ?? '')
+  const dbId = req.nextUrl.searchParams.get('dbId')
+  const name = req.nextUrl.searchParams.get('name')
 
   if (!dbId) return NextResponse.json({ error: 'dbId 필수' }, { status: 400 })
 
-  const now = new Date()
-  const y = isNaN(year)  ? now.getFullYear()   : year
-  const m = isNaN(month) ? now.getMonth() + 1  : month
-
-  const start   = `${y}-${String(m).padStart(2, '0')}-01`
-  const lastDay = new Date(y, m, 0).getDate()
-  const end     = `${y}-${String(m).padStart(2, '0')}-${lastDay}`
-
   try {
+    const queryBody: any = {
+      page_size: 100,
+    }
+
+    // 이름 필터 (있을 때만)
+    if (name) {
+      queryBody.filter = {
+        property: '계좌명',
+        title: { contains: name },
+      }
+    }
+
     const res = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
       method: 'POST',
       headers: notionHeaders(token),
-      body: JSON.stringify({
-        filter: {
-          and: [
-            { property: '지출 날짜', date: { on_or_after:  start } },
-            { property: '지출 날짜', date: { on_or_before: end   } },
-          ],
-        },
-        sorts: [{ property: '지출 날짜', direction: 'descending' }],
-        page_size: 100,
-      }),
+      body: JSON.stringify(queryBody),
     })
 
     const data = await res.json()
-    if (!res.ok) return NextResponse.json({ error: 'Notion error' }, { status: 400 })
+    if (!res.ok) {
+      console.error('Notion accounts error:', JSON.stringify(data))
+      return NextResponse.json({ error: data.message ?? 'Notion error' }, { status: 400 })
+    }
 
-    const items = (data.results as any[]).map(page => {
+    const accounts = (data.results as any[]).map(page => {
       const p = page.properties
-      return {
-        name:     p['지출 내용']?.title?.[0]?.plain_text ?? '',
-        amount:   p['지출 금액']?.number ?? 0,
-        category: p['지출 카테고리']?.relation?.[0]?.id ?? '',
-        date:     p['지출 날짜']?.date?.start ?? '',
-        gubun:    p['구분']?.select?.name ?? '',
+      
+      // 계좌명 (Title)
+      const accName = p['계좌명']?.title?.[0]?.plain_text ?? ''
+      
+      // 계좌번호 (Text)
+      const accNumber = p['계좌번호']?.rich_text?.[0]?.plain_text ?? ''
+      
+      // 자산분류 (Select)
+      const type = p['자산분류']?.select?.name ?? ''
+      
+      // 시작금액 (Number)
+      const startAmount = p['시작금액']?.number ?? 0
+      
+      // 잔고 (Formula - number 타입)
+      let balance = 0
+      const balanceFormula = p['잔고']?.formula
+      if (balanceFormula?.type === 'number') {
+        balance = balanceFormula.number ?? 0
       }
-    }).filter(i => i.name && i.amount > 0)
+      
+      // 현재 잔고 (Formula - string 타입, 이모지 포함)
+      let balanceText = ''
+      const balanceTextFormula = p['현재 잔고']?.formula
+      if (balanceTextFormula?.type === 'string') {
+        balanceText = balanceTextFormula.string ?? ''
+      }
+      
+      return {
+        id: page.id,
+        name: accName,
+        balance,
+        balanceText,
+        type,
+        accountNumber: accNumber,
+        startAmount,
+      }
+    }).filter(a => a.name)
 
-    const total = items.reduce((sum, i) => sum + i.amount, 0)
+    return NextResponse.json({ accounts })
 
-    return NextResponse.json({ total, items, year: y, month: m })
-
-  } catch {
+  } catch (e: any) {
+    console.error('accounts server error:', e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

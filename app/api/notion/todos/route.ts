@@ -1,115 +1,119 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { Client } from '@notionhq/client';
 
-const NOTION_VERSION = '2022-06-28'
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  if (!auth?.startsWith('Bearer ')) return null;
+  return auth.slice(7);
+}
 
-// 할일 목록 조회
+// GET: 할일 목록 조회 (미완료만)
 export async function GET(req: NextRequest) {
-  const token = getToken(req)
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const dbId = req.nextUrl.searchParams.get('dbId')
-  if (!dbId) return NextResponse.json({ error: 'dbId 필수' }, { status: 400 })
-
+  const token = getToken(req);
+  if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+  
+  const dbId = req.nextUrl.searchParams.get('dbId');
+  if (!dbId) return NextResponse.json({ error: 'dbId required' }, { status: 400 });
+  
   try {
-    const res = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
-      method: 'POST',
-      headers: notionHeaders(token),
-      body: JSON.stringify({
-        sorts: [{ property: '마감일', direction: 'ascending' }],
-        page_size: 100,
-      }),
-    })
-
-    const data = await res.json()
-    if (!res.ok) return NextResponse.json({ error: 'Notion error' }, { status: 400 })
-
-    const todos = (data.results as any[]).map(page => {
-      const p = page.properties
+    const notion = new Client({ auth: token });
+    const response = await notion.databases.query({
+      database_id: dbId,
+      filter: {
+        property: '완료',
+        checkbox: { equals: false }
+      },
+      sorts: [{ property: '마감일', direction: 'ascending' }],
+      page_size: 50
+    });
+    
+    const todos = response.results.map((page: any) => {
+      const props = page.properties;
+      const title = props['To-do']?.title?.[0]?.plain_text || '';
+      const isDone = props['완료']?.checkbox || false;
+      const priority = props['중요도']?.select?.name || '';
+      const urgency = props['긴급도']?.select?.name || '';
+      const label = props['라벨']?.select?.name || '';
+      const dueDate = props['마감일']?.date?.start || '';
+      
       return {
-        id:       page.id,
-        title:    p['할 일']?.title?.[0]?.plain_text ?? '',
-        isDone:   p['완료']?.checkbox ?? false,
-        priority: p['우선순위']?.select?.name ?? '',
-        dueDate:  p['마감일']?.date?.start ?? '',
-      }
-    }).filter(t => t.title)
-
-    return NextResponse.json({ todos })
-
-  } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+        id: page.id,
+        title,
+        isDone,
+        priority,
+        urgency,
+        label,
+        dueDate
+      };
+    });
+    
+    return NextResponse.json({ todos });
+  } catch (e: any) {
+    console.error('Todo fetch error:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// 할일 추가
+// POST: 할일 추가
 export async function POST(req: NextRequest) {
-  const token = getToken(req)
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
+  const token = getToken(req);
+  if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+  
   try {
-    const { dbId, title, priority, dueDate } = await req.json()
-    if (!dbId || !title) return NextResponse.json({ error: 'dbId, title 필수' }, { status: 400 })
-
-    const properties: Record<string, any> = {
-      '할 일': { title: [{ text: { content: title } }] },
-      '완료':  { checkbox: false },
+    const { dbId, title, priority, urgency, label, dueDate } = await req.json();
+    if (!dbId || !title) {
+      return NextResponse.json({ error: 'dbId, title required' }, { status: 400 });
     }
-    if (priority) properties['우선순위'] = { select: { name: priority } }
-    if (dueDate)  properties['마감일']   = { date: { start: dueDate } }
-
-    const res = await fetch('https://api.notion.com/v1/pages', {
-      method: 'POST',
-      headers: notionHeaders(token),
-      body: JSON.stringify({ parent: { database_id: dbId }, properties }),
-    })
-
-    if (!res.ok) return NextResponse.json({ error: 'Notion error' }, { status: 400 })
-    return NextResponse.json({ success: true })
-
-  } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    
+    const notion = new Client({ auth: token });
+    
+    const props: any = {
+      'To-do': { title: [{ text: { content: title } }] },
+      '완료': { checkbox: false }
+    };
+    
+    if (priority) props['중요도'] = { select: { name: priority } };
+    if (urgency)  props['긴급도'] = { select: { name: urgency } };
+    if (label)    props['라벨']   = { select: { name: label } };
+    if (dueDate)  props['마감일'] = { date: { start: dueDate } };
+    
+    await notion.pages.create({
+      parent: { database_id: dbId },
+      properties: props
+    });
+    
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error('Todo add error:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// 할일 수정 (완료 토글 / 삭제)
+// PATCH: 할일 토글/삭제
 export async function PATCH(req: NextRequest) {
-  const token = getToken(req)
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
+  const token = getToken(req);
+  if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+  
   try {
-    const { pageId, isDone, archived } = await req.json()
-    if (!pageId) return NextResponse.json({ error: 'pageId 필수' }, { status: 400 })
-
-    const body: Record<string, any> = {}
-    if (archived !== undefined) {
-      body.archived = archived
+    const { pageId, isDone, archived } = await req.json();
+    if (!pageId) return NextResponse.json({ error: 'pageId required' }, { status: 400 });
+    
+    const notion = new Client({ auth: token });
+    
+    if (archived === true) {
+      await notion.pages.update({ page_id: pageId, archived: true });
     } else {
-      body.properties = { '완료': { checkbox: isDone } }
+      await notion.pages.update({
+        page_id: pageId,
+        properties: {
+          '완료': { checkbox: isDone }
+        }
+      });
     }
-
-    const res = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
-      method: 'PATCH',
-      headers: notionHeaders(token),
-      body: JSON.stringify(body),
-    })
-
-    if (!res.ok) return NextResponse.json({ error: 'Notion error' }, { status: 400 })
-    return NextResponse.json({ success: true })
-
-  } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
-  }
-}
-
-function getToken(req: NextRequest) {
-  const auth = req.headers.get('Authorization') ?? ''
-  return auth.startsWith('Bearer ') ? auth.slice(7) : null
-}
-
-function notionHeaders(token: string) {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'Notion-Version': NOTION_VERSION,
+    
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error('Todo update error:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
