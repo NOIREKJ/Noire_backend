@@ -17,104 +17,43 @@ export async function GET(req: NextRequest) {
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    // 1단계: search API로 모든 DB 가져오기 (start_cursor로 페이지네이션)
-    const allDbs: any[] = []
-    let cursor: string | undefined = undefined
-    let hasMore = true
-
-    while (hasMore) {
-      const body: any = {
-        filter: { value: 'database', property: 'object' },
-        page_size: 100,
-      }
-      if (cursor) body.start_cursor = cursor
-
-      const res = await fetch('https://api.notion.com/v1/search', {
-        method: 'POST',
-        headers: notionHeaders(token),
-        body: JSON.stringify(body),
-      })
-
-      const data = await res.json()
-      if (!res.ok) {
-        console.error('Notion search error:', JSON.stringify(data))
-        return NextResponse.json({ error: 'Notion API error' }, { status: 400 })
-      }
-
-      allDbs.push(...(data.results as any[]))
-      hasMore = data.has_more === true
-      cursor = data.next_cursor
-    }
-
-    // 2단계: 페이지도 검색해서 부모 페이지 찾기
-    const allPages: any[] = []
-    cursor = undefined
-    hasMore = true
-
-    while (hasMore) {
-      const body: any = {
-        filter: { value: 'page', property: 'object' },
-        page_size: 100,
-      }
-      if (cursor) body.start_cursor = cursor
-
-      const res = await fetch('https://api.notion.com/v1/search', {
-        method: 'POST',
-        headers: notionHeaders(token),
-        body: JSON.stringify(body),
-      })
-
-      const data = await res.json()
-      if (res.ok) {
-        allPages.push(...(data.results as any[]))
-        hasMore = data.has_more === true
-        cursor = data.next_cursor
-      } else {
-        hasMore = false
-      }
-    }
+    // 1단계: search API로 모든 DB 가져오기
+    const allDbs = await searchAll(token, 'database')
     
-// 디버그: 모든 페이지 제목 출력
-const allPageTitles = allPages.map((p: any) => {
-  const title = p.properties?.title?.title?.[0]?.plain_text 
-             ?? p.properties?.Name?.title?.[0]?.plain_text 
-             ?? '(no title)'
-  return { id: p.id, title }
-})
-console.log('=== All accessible pages ===')
-console.log('Total pages:', allPages.length)
-console.log('Page titles:', allPageTitles.slice(0, 30))  // 처음 30개만
+    // 2단계: 모든 페이지도 가져오기
+    const allPages = await searchAll(token, 'page')
+    
+    console.log(`Total: ${allDbs.length} DBs, ${allPages.length} pages`)
 
-    // 3단계: 부모 페이지에서 child_database 블록 찾기
+    // 3단계: NOIRE 페이지 찾기 + 그 안의 모든 자식 DB 재귀 탐색
+    const childDbs: any[] = []
+    const visited = new Set<string>()
+    
     const noirePage = allPages.find((p: any) => {
       const title = p.properties?.title?.title?.[0]?.plain_text 
                  ?? p.properties?.Name?.title?.[0]?.plain_text 
                  ?? ''
-      // 더 관대한 매칭
-       const t = title.toLowerCase()
-       return (t.includes('noire') && t.includes('가계부')) || t.includes('배포용')
-
+      const t = title.toLowerCase()
+      return (t.includes('noire') && (t.includes('가계부') || t.includes('템플릿'))) || t.includes('배포용')
     })
 
-    let childDbs: any[] = []
     if (noirePage) {
       console.log('Found NOIRE page:', noirePage.id)
-      // 부모 페이지의 children 블록 가져오기
-      childDbs = await fetchChildDatabases(token, noirePage.id)
-      console.log('Child DBs in NOIRE page:', childDbs.map(d => ({ id: d.id, title: d.title })))
+      // 재귀 탐색: NOIRE 페이지부터 모든 하위 페이지의 DB 찾기
+      await collectChildDatabases(token, noirePage.id, childDbs, visited, 0)
+      console.log('Total child DBs found via recursion:', childDbs.length)
+      console.log('Child DB titles:', childDbs.map(d => d.title))
     }
 
     // 4단계: 매칭
     const found: Record<string, string> = {}
     const allTitles: string[] = []
-    
-    // search 결과 + child blocks 결과 합침
+
     const dbCandidates = [
-      ...allDbs.map(d => ({ id: d.id, title: d.title?.[0]?.plain_text ?? '' })),
+      ...allDbs.map((d: any) => ({ id: d.id, title: d.title?.[0]?.plain_text ?? '' })),
       ...childDbs,
     ]
 
-    // 중복 제거
     const seen = new Set<string>()
     const uniqueDbs = dbCandidates.filter(d => {
       if (seen.has(d.id)) return false
@@ -141,9 +80,9 @@ console.log('Page titles:', allPageTitles.slice(0, 30))  // 처음 30개만
     const allFound = Object.keys(DB_NAMES).every(k => found[k])
 
     console.log('=== DB Search ===')
-    console.log('All DBs found:', allTitles)
+    console.log('All DBs:', allTitles)
     console.log('Matched:', found)
-    console.log('Missing keys:', Object.keys(DB_NAMES).filter(k => !found[k]))
+    console.log('Missing:', Object.keys(DB_NAMES).filter(k => !found[k]))
 
     return NextResponse.json({
       found,
@@ -158,9 +97,50 @@ console.log('Page titles:', allPageTitles.slice(0, 30))  // 처음 30개만
   }
 }
 
-// 페이지 안의 child_database 블록을 모두 찾기
-async function fetchChildDatabases(token: string, pageId: string): Promise<any[]> {
-  const dbs: any[] = []
+// search API 페이지네이션 헬퍼
+async function searchAll(token: string, type: 'page' | 'database'): Promise<any[]> {
+  const all: any[] = []
+  let cursor: string | undefined = undefined
+  let hasMore = true
+
+  while (hasMore) {
+    const body: any = {
+      filter: { value: type, property: 'object' },
+      page_size: 100,
+    }
+    if (cursor) body.start_cursor = cursor
+
+    const res = await fetch('https://api.notion.com/v1/search', {
+      method: 'POST',
+      headers: notionHeaders(token),
+      body: JSON.stringify(body),
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      console.error('search error:', JSON.stringify(data))
+      break
+    }
+
+    all.push(...(data.results as any[]))
+    hasMore = data.has_more === true
+    cursor = data.next_cursor
+  }
+
+  return all
+}
+
+// 페이지의 자식 블록 재귀 탐색해서 모든 child_database 찾기
+async function collectChildDatabases(
+  token: string,
+  pageId: string,
+  result: any[],
+  visited: Set<string>,
+  depth: number
+): Promise<void> {
+  if (visited.has(pageId) || depth > 5) return  // 무한루프/너무 깊은 탐색 방지
+  visited.add(pageId)
+
   let cursor: string | undefined = undefined
   let hasMore = true
 
@@ -176,24 +156,28 @@ async function fetchChildDatabases(token: string, pageId: string): Promise<any[]
 
     const data = await res.json()
     if (!res.ok) {
-      console.error('children fetch error:', JSON.stringify(data))
-      break
+      console.error(`children error for ${pageId}:`, JSON.stringify(data))
+      return
     }
 
     for (const block of (data.results as any[])) {
       if (block.type === 'child_database') {
-        dbs.push({
+        result.push({
           id: block.id,
           title: block.child_database?.title ?? '',
         })
+      } else if (block.type === 'child_page') {
+        // 자식 페이지 재귀 탐색
+        await collectChildDatabases(token, block.id, result, visited, depth + 1)
+      } else if (block.has_children) {
+        // toggle, callout 같은 컨테이너 블록도 탐색
+        await collectChildDatabases(token, block.id, result, visited, depth + 1)
       }
     }
 
     hasMore = data.has_more === true
     cursor = data.next_cursor
   }
-
-  return dbs
 }
 
 function getToken(req: NextRequest) {
