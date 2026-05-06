@@ -73,13 +73,27 @@ export async function GET(req: NextRequest) {
         hasMore = false
       }
     }
+    
+// 디버그: 모든 페이지 제목 출력
+const allPageTitles = allPages.map((p: any) => {
+  const title = p.properties?.title?.title?.[0]?.plain_text 
+             ?? p.properties?.Name?.title?.[0]?.plain_text 
+             ?? '(no title)'
+  return { id: p.id, title }
+})
+console.log('=== All accessible pages ===')
+console.log('Total pages:', allPages.length)
+console.log('Page titles:', allPageTitles.slice(0, 30))  // 처음 30개만
 
     // 3단계: 부모 페이지에서 child_database 블록 찾기
     const noirePage = allPages.find((p: any) => {
       const title = p.properties?.title?.title?.[0]?.plain_text 
                  ?? p.properties?.Name?.title?.[0]?.plain_text 
                  ?? ''
-      return title.includes('NOIRE') && title.includes('가계부')
+      // 더 관대한 매칭
+       const t = title.toLowerCase()
+       return (t.includes('noire') && t.includes('가계부')) || t.includes('배포용')
+
     })
 
     let childDbs: any[] = []
