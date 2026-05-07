@@ -3,14 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 const NOTION_VERSION = '2022-06-28'
 
 const DB_NAMES: Record<string, string[]> = {
-  expense:  ['expenses db', 'expense db', '지출 db', '지출'],
-  income:   ['income db', '수입 db', '수입'],
-  accounts: ['accounts db', '계좌 db', '계좌'],
-  category: ['category db', 'categories db', '카테고리 db', '카테고리'],
-  stock:    ['stock db', 'stocks db', '주식 db', '주식'],
-  networth: ['net worth db', 'networth db', '자산 db', '순자산 db'],
-  todos:    ['todo db', 'todos db', 'to-do db', '할일 db', '할일'],
+  expense:         ['expenses db', 'expense db', '지출 db', '지출'],
+  income:          ['income db', '수입 db', '수입'],
+  accounts:        ['accounts db', '계좌 db', '계좌'],
+  category:        ['category db', 'categories db', '카테고리 db', '카테고리'],
+  stock:           ['stock db', 'stocks db', '주식 db', '주식'],
+  networth:        ['net worth db', 'networth db', '자산 db', '순자산 db'],
+  networthHistory: ['📈 net worth history', 'net worth history', 'networth history', '자산 추이', '자산추이'],
+  todos:           ['todo db', 'todos db', 'to-do db', '할일 db', '할일'],
 }
+
 
 export async function GET(req: NextRequest) {
   const token = getToken(req)
