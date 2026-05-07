@@ -35,6 +35,15 @@ export async function GET(req: NextRequest) {
       console.error('Notion accounts error:', JSON.stringify(data))
       return NextResponse.json({ error: data.message ?? 'Notion error' }, { status: 400 })
     }
+    
+// 디버그: 첫 번째 페이지의 properties 구조 출력
+if (data.results.length > 0) {
+  console.log('=== First account properties ===')
+  console.log(JSON.stringify(data.results[0].properties, null, 2))
+}
+
+const accounts = (data.results as any[]).map(page => {
+  const p = page.properties
 
     const accounts = (data.results as any[]).map(page => {
       const p = page.properties
