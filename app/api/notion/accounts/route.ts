@@ -56,12 +56,14 @@ if (data.results.length > 0) {
       // 시작금액 (Number)
       const startAmount = p['시작금액']?.number ?? 0
       
-      // 잔고 (Formula - number 타입)
-      let balance = 0
-      const balanceFormula = p['잔고']?.formula
-      if (balanceFormula?.type === 'number') {
-        balance = balanceFormula.number ?? 0
-      }
+     // 잔고 (Number 또는 Formula 둘 다 지원)
+     let balance = 0
+    if (p['잔고']?.type === 'number') {
+     balance = p['잔고']?.number ?? 0
+    } else if (p['잔고']?.type === 'formula') {
+     balance = p['잔고']?.formula?.number ?? 0
+    }
+
       
       // 현재 잔고 (Formula - string 타입, 이모지 포함)
       let balanceText = ''
