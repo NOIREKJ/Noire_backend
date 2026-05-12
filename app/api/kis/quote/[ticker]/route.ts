@@ -34,6 +34,13 @@ export async function GET(
     appKey = kis.credentials.app_key
     appSecret = kis.credentials.app_secret
   } catch (e: any) {
+    // 한투 미연동은 명확한 코드로
+    if (e.code === 'KIS_NOT_CONNECTED') {
+      return NextResponse.json(
+        { error: e.message, code: 'KIS_NOT_CONNECTED' },
+        { status: 400 }
+      )
+    }
     return NextResponse.json(
       { error: e.message ?? 'KIS 인증 실패' },
       { status: 500 }

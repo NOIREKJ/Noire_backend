@@ -34,7 +34,11 @@ export async function getKISAccessToken(userId: string): Promise<{
     .maybeSingle()
   
   if (error) throw new Error(`DB 오류: ${error.message}`)
-  if (!cred) throw new Error('한투 연동이 되어있지 않아요. 설정에서 등록해주세요.')
+ if (!cred) {
+    const err: any = new Error('한투 연동이 되어있지 않아요. 설정에서 등록해주세요.')
+    err.code = 'KIS_NOT_CONNECTED'
+    throw err
+  }
   
   // 2. 키 복호화
   let plainAppKey: string
